@@ -34,7 +34,8 @@ default_parallelism = os.cpu_count()
 
 # List of Databases to have their external tables migrated
 
-external_tables_dbs = ["test_uc_migration_1", "test_uc_migration_2", "test_uc_migration_3"]
+#external_tables_dbs = ["test_uc_migration_1", "test_uc_migration_2", "test_uc_migration_3"]
+external_tables_dbs = ["test_uc_migration_1", "test_uc_migration_2", "test_uc_migration_3", "test_uc_migration_1_non_delta", "test_uc_migration_2_non_delta"]
 
 # COMMAND ----------
 
@@ -64,20 +65,25 @@ for db in external_tables_dbs:
     for table in tables:
         table_name = table.tableName
         try:
-            desc = spark.sql(f"DESCRIBE FORMATTED {db}.{table_name}").filter("col_name = 'Location' OR col_name='Database' OR col_name='Table' OR col_name='Type'")
-            for info in desc:
-                desc_all = desc.collect()
-                database_name = get_value(desc_all, 0, 1, "NA")
-                table_name = get_value(desc_all, 1, 1, "NA")
-                table_type = get_value(desc_all, 2, 1, "NA")          
-                table_location = get_value(desc_all, 3, 1, "NA")
+            desc = spark.sql(f"DESCRIBE FORMATTED {db}.{table_name}").filter("col_name = 'Location' OR col_name='Database' OR col_name='Table' OR col_name='Type' OR col_name='Provider'")
+            for info in desc.collect():
+                if info["col_name"] == "Database":
+                  database_name = info["data_type"]
+                elif info["col_name"] == "Table":
+                  table_name = info["data_type"]
+                elif info["col_name"] == "Type":
+                  table_type = info["data_type"]
+                elif info["col_name"] == "Location":
+                  table_location = info["data_type"]
+                elif info["col_name"] == "Provider":
+                  table_provider = info["data_type"]
 
-            descriptions.append((database_name, table_name, table_type, table_location, None))
+            descriptions.append((database_name, table_name, table_type, table_location, table_provider, ""))
         except Exception as ex:
-          descriptions.append((db, table_name, None, None, str(ex)))
+          descriptions.append((db, table_name, None, None, None, str(ex)))
             
 # Create DataFrame from the results
-source_catalog_tables = spark.createDataFrame(descriptions, ['database_name', 'table_name', 'table_type', 'table_location', 'error'])
+source_catalog_tables = spark.createDataFrame(descriptions, ['database_name', 'table_name', 'table_type', 'table_location', 'table_provider', 'error'])
 display(source_catalog_tables)
 
 # COMMAND ----------
@@ -126,6 +132,7 @@ def sync_tables(inventory_obj):
   db_name = inventory_obj["database_name"]
   tb_name = inventory_obj["table_name"]
   tb_location = inventory_obj["table_location"]
+  tb_provider = inventory_obj["table_provider"]
   full_name_source = f"{source_catalog}.{db_name}.{tb_name}"
   full_name_target = f"{destination_catalog}.{db_name}.{tb_name}"
   log = []
@@ -137,19 +144,25 @@ def sync_tables(inventory_obj):
     spark.sql(f"DROP TABLE IF EXISTS {full_name_target}")
 
     # Create external table in Unity Catalog
-    print(f"Creating table {full_name_target} from location '{tb_location}'")
-    df_sync_result = spark.sql(f"create table if not exists {full_name_target} location '{tb_location}'")
+    print(f"Creating table {full_name_target} from location '{tb_location}' in {tb_provider} format")
+
+    if tb_provider == "delta":
+      df_sync_result = spark.sql(f"create table if not exists {full_name_target} location '{tb_location}'")
+    elif tb_provider == "parquet":
+      df_sync_result = spark.sql(f"create table if not exists {full_name_target} using parquet location '{tb_location}'")
+    else:
+      raise Exception(f"Table format {tb_provider} is not supported")
 
     # Generating log
-    log.append((full_name_source, full_name_target, table_location, "OK", ""))
+    log.append((full_name_source, full_name_target, tb_location, tb_provider, "OK", ""))
 
   except Exception as e:
     error = str(e).replace("'", "\\'")
-    print(f"Unable to sync table {full_name_source} to {full_name_target}: {error}")
+    print(f"Unable to create table {full_name_source} to {full_name_target} of type {tb_provider}: {error}")
     # Generating log
-    log.append((full_name_source, full_name_target, table_location, "ERROR", error))
+    log.append((full_name_source, full_name_target, tb_location, tb_provider, "ERROR", error))
 
-  source_catalog_tables = spark.createDataFrame(log, ['source_table', 'target_table', 'table_location', 'status', 'error'])
+  source_catalog_tables = spark.createDataFrame(log, ['source_table', 'target_table', 'table_location', 'table_provider', 'status', 'error'])
 
   # Save result in a log table
   source_catalog_tables.write.format("delta").mode("append").saveAsTable(f"{destination_catalog}.{log_database}.{log_sync_tables}")
@@ -161,7 +174,7 @@ def sync_tables(inventory_obj):
 # Setting up log table
 log_table_name = f"{destination_catalog}.{log_database}.{log_sync_tables}"
 spark.sql(f"CREATE DATABASE IF NOT EXISTS`{destination_catalog}`.{log_database}")  
-spark.sql(f"CREATE OR REPLACE TABLE {log_table_name} (source_table STRING, target_table STRING, table_location STRING, status STRING, error STRING)")
+spark.sql(f"CREATE OR REPLACE TABLE {log_table_name} (source_table STRING, target_table STRING, table_location STRING, table_provider STRING, status STRING, error STRING)")
 
 # Executing Sync command in a thread pull
 with ThreadPoolExecutor(max_workers = default_parallelism) as executor:
