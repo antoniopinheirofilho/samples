@@ -41,12 +41,12 @@ default_parallelism = os.cpu_count()
 
 # List of Managed Tables in scope
 
-managed_tables_list = [{"db_name": "test_uc_migration_1", "table_name": "internal_table_1", "target_location": "abfss://testicatuexternaltable@oneenvadls.dfs.core.windows.net/managed/test_uc_migration_1/internal_table_1"},
- {"db_name": "test_uc_migration_1", "table_name": "internal_table_2", "target_location": "abfss://testicatuexternaltable@oneenvadls.dfs.core.windows.net/managed/test_uc_migration_1/internal_table_2"},
- {"db_name": "test_uc_migration_2", "table_name": "internal_table_1", "target_location": "abfss://testicatuexternaltable@oneenvadls.dfs.core.windows.net/managed/test_uc_migration_2/internal_table_1"},
- {"db_name": "test_uc_migration_2", "table_name": "internal_table_2", "target_location": "abfss://testicatuexternaltable@oneenvadls.dfs.core.windows.net/managed/test_uc_migration_2/internal_table_2"},
- {"db_name": "test_uc_migration_3", "table_name": "internal_table_1", "target_location": "abfss://testicatuexternaltable@oneenvadls.dfs.core.windows.net/managed/test_uc_migration_3/internal_table_1"},
- {"db_name": "test_uc_migration_3", "table_name": "internal_table_2", "target_location": "abfss://testicatuexternaltable@oneenvadls.dfs.core.windows.net/managed/test_uc_migration_3/internal_table_2"}]
+managed_tables_list = [{"db_name": "test_uc_migration_1", "table_name": "internal_table_1", "target_location": ""},
+ {"db_name": "test_uc_migration_1", "table_name": "internal_table_2", "target_location": ""},
+ {"db_name": "test_uc_migration_2", "table_name": "internal_table_1", "target_location": ""},
+ {"db_name": "test_uc_migration_2", "table_name": "internal_table_2", "target_location": ""},
+ {"db_name": "test_uc_migration_3", "table_name": "internal_table_1", "target_location": ""},
+ {"db_name": "test_uc_migration_3", "table_name": "internal_table_2", "target_location": ""}]
 
 # COMMAND ----------
 
