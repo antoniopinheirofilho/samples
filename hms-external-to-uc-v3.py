@@ -17,6 +17,11 @@
 # MAGIC - hms_db_to_migrate: The database in hive_metastore to be migrated to UC. This parameter takes precedence over "table_inventory_path". Therefore, if both parameters are provided, this script will consider only "hms_db_to_migrate"
 # MAGIC - table_inventory_path: Path to the CSV file containing the list of tables to be migrated. This file must be a CSV with the columns "db" and "table". The script automatically assume that these tables belong to the hive_metastore catalog
 # MAGIC - table_owner_uc: The principal who should own the tables in UC after migration. The script will change the table ownership to this user at the end of the process
+# MAGIC
+# MAGIC **Query Results:**
+# MAGIC
+# MAGIC select * from published_prod.uc_migration_log_db.uc_migration_log_tables_tb_{DATABASE}
+# MAGIC where batch_id = (select max(batch_id) from published_prod.uc_migration_log_db.uc_migration_log_tables_tb__{DATABASE})
 
 # COMMAND ----------
 
@@ -26,11 +31,11 @@
 # COMMAND ----------
 
 #dbutils.widgets.removeAll()
-#dbutils.widgets.text("destination_catalog", "")
-#dbutils.widgets.text("is_dry_run", "")
-#dbutils.widgets.text("table_inventory_path", "")
-#dbutils.widgets.text("hms_db_to_migrate", "")
-#dbutils.widgets.text("table_owner_uc", "")
+#dbutils.widgets.text("destination_catalog", "published_prod")
+#dbutils.widgets.text("is_dry_run", "True")
+#dbutils.widgets.text("table_inventory_path", "/Volumes/published_prod/uc_migration_log_db/uc_table_inventory_volume/uc_table_inventory.csv")
+#dbutils.widgets.text("hms_db_to_migrate", "tinder_events_delta")
+#dbutils.widgets.text("table_owner_uc", "198f3499-c207-41b4-bf28-c250f9edd6b0")
 
 # COMMAND ----------
 
@@ -45,6 +50,9 @@ import re
 source_catalog = "hive_metastore"
 destination_catalog = dbutils.widgets.get("destination_catalog")
 
+table_inventory_path = dbutils.widgets.get("table_inventory_path")
+hms_database_to_migrate = dbutils.widgets.get("hms_db_to_migrate")
+
 # Safety check
 if destination_catalog.strip() == "hive_metastore" or not destination_catalog.strip():
     raise Exception("ERROR: Invalid destionation catalog.") 
@@ -56,8 +64,10 @@ if not table_owner.strip():
 
 # Log Database
 log_database = "uc_migration_log_db"
-log_sync_tables = "uc_migration_log_tables_tb"
-log_scan = "uc_migration_log_scan"
+
+if hms_database_to_migrate.strip():
+    log_sync_tables = "uc_migration_log_tables_tb_" + hms_database_to_migrate
+    log_scan = "uc_migration_log_scan_" + hms_database_to_migrate
 
 # Parallelism when syncing the tables
 #default_parallelism = os.cpu_count()
@@ -100,11 +110,12 @@ spark.sql(f"DELETE FROM {log_scan_table_name} WHERE batch_id = {batch_id}")
 
 # Build a list of tables to be migrated
 
-table_inventory_path = dbutils.widgets.get("table_inventory_path")
-hms_database_to_migrate = dbutils.widgets.get("hms_db_to_migrate")
-
 if hms_database_to_migrate.strip():
-    list_tables = spark.sql(f"show tables in hive_metastore.{hms_database_to_migrate}").drop("isTemporary").withColumnRenamed("tableName", "table").withColumnRenamed("database", "db")
+    list_dbs = hms_database_to_migrate.split(",")
+    list_tables = spark.sql(f"show tables in hive_metastore.{list_dbs[0]}").drop("isTemporary").withColumnRenamed("tableName", "table").withColumnRenamed("database", "db")
+    if len(list_dbs) > 1:
+        for db in list_dbs[1:]:
+            list_tables = list_tables.union(spark.sql(f"show tables in hive_metastore.{db}").drop("isTemporary").withColumnRenamed("tableName", "table").withColumnRenamed("database", "db"))
 elif table_inventory_path.strip():
     list_tables = spark.read.option("header", True).csv(table_inventory_path)
 else:
@@ -210,6 +221,7 @@ def sync_tables(inventory_obj, batch_id, dry_run, execution_time):
     # Create external table in Unity Catalog
     if tb_provider == "hive":
       if not dry_run:
+        spark.sql(f"ALTER TABLE {full_name_target} OWNER TO `antonio.filho@gotinder.com`;") # PLEASE REMOVE THIS!!!
         spark.sql(f"DROP TABLE IF EXISTS {full_name_target}")
         creat_statement = spark.sql(f'show create table {full_name_source}').collect()[0][0]
         command = re.sub("CREATE TABLE .* \(", f"CREATE TABLE {full_name_target} (", creat_statement)
@@ -277,3 +289,7 @@ for item in tables_migrated:
     except Exception as e:
         error = str(e).replace("'", "\\'")
         print(f"Unable to change ownership of table {table_name} to {table_owner}: {error}")
+
+# COMMAND ----------
+
+
