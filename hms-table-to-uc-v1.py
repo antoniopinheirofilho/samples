@@ -454,7 +454,7 @@ else:
         executor.map(migrate_managed_tables, managed_tables.collect(), itertools.repeat(batch_id), itertools.repeat(dry_run), itertools.repeat(execution_time))
 
     ############### Migrate Views ###############
-    views = source_catalog_tables_valid.where(col("table_type") == "VIEW").filter(~col("db_name").isin(["sapecc", "sapecc_v_internal", "sapcrm", "sapcrm_v_internal", "hybrispcm", "hybrispcm_v_internal"])).select("db_name", "table_name")
+    views = source_catalog_tables_valid.where(col("table_type") == "VIEW").select("db_name", "table_name")
     view_list = [ f"{row.db_name}.{row.table_name}" for row in views.collect() ]
 
     # Create list of views and dependencies
