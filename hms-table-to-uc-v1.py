@@ -29,8 +29,8 @@
 #dbutils.widgets.text("destination_catalog", "dev")
 #dbutils.widgets.text("is_dry_run", "True")
 #dbutils.widgets.text("table_inventory_path", "")
-#dbutils.widgets.text("hms_db_to_migrate", "")
-#dbutils.widgets.text("table_owner_uc", "")
+#dbutils.widgets.text("hms_db_to_migrate", "c4c")
+#dbutils.widgets.text("table_owner_uc", "svc_databricksna@insight.com")
 
 # COMMAND ----------
 
@@ -379,14 +379,13 @@ def migrate_views(view_name, batch_id, dry_run, execution_time):
   try:
 
     old_create_table = spark.sql(f"show create table {full_name_source}").collect()[0][0]
-    new_create_table = old_create_table
 
     if str.upper("AS WITH") in str.upper(old_create_table):
-      old_create_table = f"CREATE VIEW {full_name_source} " + re.sub(r'^.*?(?=AS WITH)', '', old_create_table, flags=re.IGNORECASE | re.DOTALL)
+      old_create_table = f"CREATE VIEW {view_name} " + re.sub(r'^.*?(?=AS WITH)', '', old_create_table, flags=re.IGNORECASE | re.DOTALL)
     elif str.upper("AS SELECT") in str.upper(old_create_table):
-      old_create_table = f"CREATE VIEW {full_name_source} " + re.sub(r'^.*?(?=AS SELECT)', '', old_create_table, flags=re.IGNORECASE | re.DOTALL)
+      old_create_table = f"CREATE VIEW {view_name} " + re.sub(r'^.*?(?=AS SELECT)', '', old_create_table, flags=re.IGNORECASE | re.DOTALL)
     else:
-      old_create_table = f"CREATE VIEW {full_name_source} " + re.sub(r'^.*?(?=AS \()', '', old_create_table, flags=re.IGNORECASE | re.DOTALL)
+      old_create_table = f"CREATE VIEW {view_name} " + re.sub(r'^.*?(?=AS \()', '', old_create_table, flags=re.IGNORECASE | re.DOTALL)
 
     list_dependencies = []
     for table in parse_one(old_create_table, dialect="spark").find_all(exp.Table):
@@ -397,13 +396,13 @@ def migrate_views(view_name, batch_id, dry_run, execution_time):
 
     list_dependencies = list(set(list_dependencies))
 
+    new_create_table = old_create_table
     for full_tb_name in list_dependencies:
       full_uc_table_name = f"{destination_catalog}.{full_tb_name}"
-      regex = r'\b{}\b'.format(re.escape(full_tb_name))
-      new_create_table = re.sub(regex, full_uc_table_name, new_create_table)
+      new_create_table = re.sub(r'\b{}\b'.format(re.escape(full_tb_name)), full_uc_table_name, new_create_table)
 
     new_create_table = new_create_table.replace("CREATE VIEW", "CREATE OR REPLACE VIEW")
-
+    print(new_create_table)
     # Safety check
     if new_create_table.startswith(f"CREATE OR REPLACE VIEW {destination_catalog}."):
       command = new_create_table
@@ -455,7 +454,7 @@ else:
         executor.map(migrate_managed_tables, managed_tables.collect(), itertools.repeat(batch_id), itertools.repeat(dry_run), itertools.repeat(execution_time))
 
     ############### Migrate Views ###############
-    views = source_catalog_tables_valid.where(col("table_type") == "VIEW").select("db_name", "table_name")
+    views = source_catalog_tables_valid.where(col("table_type") == "VIEW").filter(~col("db_name").isin(["sapecc", "sapecc_v_internal", "sapcrm", "sapcrm_v_internal", "hybrispcm", "hybrispcm_v_internal"])).select("db_name", "table_name")
     view_list = [ f"{row.db_name}.{row.table_name}" for row in views.collect() ]
 
     # Create list of views and dependencies
