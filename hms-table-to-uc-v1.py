@@ -29,8 +29,8 @@
 #dbutils.widgets.text("destination_catalog", "dev")
 #dbutils.widgets.text("is_dry_run", "True")
 #dbutils.widgets.text("table_inventory_path", "")
-#dbutils.widgets.text("hms_db_to_migrate", "c4c")
-#dbutils.widgets.text("table_owner_uc", "svc_databricksna@insight.com")
+#dbutils.widgets.text("hms_db_to_migrate", "")
+#dbutils.widgets.text("table_owner_uc", "")
 
 # COMMAND ----------
 
