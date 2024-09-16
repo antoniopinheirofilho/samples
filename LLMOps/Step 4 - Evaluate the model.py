@@ -4,6 +4,10 @@
 
 # COMMAND ----------
 
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 # MAGIC %pip install mlflow databricks-sdk evaluate rouge_score databricks-agents
 
 # COMMAND ----------
@@ -18,10 +22,10 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 endpoint_name = "llm_validation_endpoint"
-endpoint_host = "https://adb-3630608912046230.10.azuredatabricks.net"
-endpoint_token = ""
+endpoint_host = "https://adb-2332510266816567.7.azuredatabricks.net/"
+endpoint_token = dbutils.secrets.get(scope="creds", key="pat")
 inference_table = "llmops_dev.model_tracking.rag_app_realtime_payload"
-eval_table = "demo_prep.fine_tunning.chat_completion_evaluation_dataset"
+eval_table = "demo_prep.vector_search_data.eval_set_databricks_documentation"
 
 # COMMAND ----------
 
@@ -108,8 +112,8 @@ ds_for_eval = []
 for row in df_eval.collect():
 
     request_id += 1
-    question = row["question"]
-    expected_answer = row["answer"]
+    question = row["request"]
+    expected_answer = row["expected_response"]
 
     response = get_answer(question)
 
@@ -170,21 +174,6 @@ with mlflow.start_run() as run:
         data=pd_data_mlflow,
         targets="ground_truth",
         predictions="predictions",
-        extra_metrics=[mlflow.metrics.genai.answer_similarity()],
-        evaluators="default"
-    )
-    print(f"See aggregated evaluation results below: \n{results.metrics}")
-
-    eval_table = results.tables["eval_results_table"]
-    print(f"See evaluation table below: \n{eval_table}")
-
-# COMMAND ----------
-
-with mlflow.start_run() as run:
-    results = mlflow.evaluate(
-        data=pd_data_mlflow,
-        targets="ground_truth",
-        predictions="predictions",
         model_type="question-answering"
     )
     
@@ -192,17 +181,26 @@ with mlflow.start_run() as run:
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC # Evaludate using Rouge score
+
+# COMMAND ----------
+
 with mlflow.start_run() as run:
     results = mlflow.evaluate(
         data=pd_data_mlflow,
         targets="ground_truth",
         predictions="predictions",
-        evaluators="default"
+        model_type="text-summarization"
     )
     
     results.tables["eval_results_table"].display()
 
 # COMMAND ----------
 
-# Check https://huggingface.co/spaces/evaluate-metric/bleu
-# Check https://huggingface.co/spaces/evaluate-metric/rouge
+results.metrics
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # TODO: What is the criteria for the validation to fail?

@@ -4,19 +4,11 @@
 
 # COMMAND ----------
 
-#%pip install -U --quiet langchain==0.1.16 databricks-vectorsearch==0.22 pydantic==1.10.9 mlflow==2.12.1  databricks-sdk==0.28.0 cloudpickle>=2.1.0 "unstructured[pdf,docx]==0.10.30"
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
-#%pip install pydantic -U
-
-# COMMAND ----------
-
-#%pip install -U --quiet langchain langchain-community databricks-vectorsearch pydantic==1.10.9 mlflow  databricks-sdk cloudpickle "unstructured[pdf,docx]==0.10.30"
-
-# COMMAND ----------
-
-# MAGIC %pip install -U --quiet langchain langchain-community databricks-vectorsearch pydantic mlflow  databricks-sdk cloudpickle "unstructured[pdf,docx]==0.10.30"
+# MAGIC %pip install -U --quiet langchain==0.2.16 langchain-community==0.2.17 databricks-vectorsearch pydantic==1.10.9 mlflow==2.16.1
 
 # COMMAND ----------
 
@@ -251,6 +243,10 @@ def custom_chain(prompt):
 
 # COMMAND ----------
 
+embedding_model = "databricks-gte-large-en"
+
+# COMMAND ----------
+
 from databricks.vector_search.client import VectorSearchClient
 from langchain.vectorstores import DatabricksVectorSearch
 from langchain.embeddings import DatabricksEmbeddings
@@ -319,7 +315,7 @@ chain = create_retrieval_chain(retriever, question_answer_chain)
 #chain = (
 #        { 
 #         "context": get_retriever(), 
-#         "question": RunnablePassthrough()
+#         "input": RunnablePassthrough()
 #        }
 #        | prompt
 #        | chat_model
@@ -336,6 +332,18 @@ chain.invoke({"input": "How do I rob a bank??"})
 
 # COMMAND ----------
 
+response = chain.invoke({"input": "How do I bake a cake??"})
+
+#print(type(response["context"][0]))
+
+#for document in response["context"]:
+#    print(document)
+#    print()
+
+print(response)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Register model to UC
 
@@ -349,8 +357,14 @@ import langchain
 mlflow.set_registry_uri("databricks-uc")
 model_name = f"{target_model_catalog}.{target_model_schema}.basic_rag_demo_foundation_model"
 
-question = {"input": "How can I restart a cluster?"}
-answer = {"input": "How can I restart a cluster?", "content": "blablabla", "answer": "click on restart"}
+question = {
+            'input': 'How can I restart a cluster?'
+           }
+answer = {
+          'input': 'How can I restart a cluster?', 
+          'content': ['docs'], 
+          'answer': 'click on restart'
+         }
 
 # Log the model to MLflow
 with mlflow.start_run(run_name="basic_rag_bot"):
@@ -366,9 +380,23 @@ with mlflow.start_run(run_name="basic_rag_bot"):
             "langchain-community",
             "databricks-vectorsearch",
         ],
-        input_example=question,
         signature=signature
       )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Test model
+
+# COMMAND ----------
+
+import mlflow.pyfunc
+model_version_uri = "models:/llmops_dev.model_schema.basic_rag_demo_foundation_model/19"
+champion_version = mlflow.pyfunc.load_model(model_version_uri)
+
+# COMMAND ----------
+
+champion_version.predict({"input": "How can I bake a cake??"})
 
 # COMMAND ----------
 

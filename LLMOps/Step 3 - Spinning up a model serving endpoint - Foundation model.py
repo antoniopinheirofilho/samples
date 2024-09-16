@@ -4,7 +4,11 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install -U --quiet langchain langchain-community databricks-vectorsearch pydantic mlflow  databricks-sdk cloudpickle "unstructured[pdf,docx]==0.10.30"
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# MAGIC %pip install -U --quiet databricks-sdk
 
 # COMMAND ----------
 
@@ -35,8 +39,9 @@ def get_latest_model_version(model_name_in:str = None):
     """
     client = MlflowClient()
     model_version_infos = client.search_model_versions("name = '%s'" % model_name_in)
+
     if model_version_infos:
-      return max([model_version_info.version for model_version_info in model_version_infos])
+      return max([int(model_version_info.version) for model_version_info in model_version_infos])
     else:
       return None
 
@@ -79,6 +84,9 @@ scale_to_zero = False
 API_ROOT = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().get() 
 API_TOKEN = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
 
+# PAT token for the Databricks workspace
+endpoint_token = dbutils.secrets.get(scope="creds", key="pat")
+
 # COMMAND ----------
 
 from databricks.sdk.service.serving import EndpointCoreConfigInput
@@ -92,8 +100,8 @@ endpoint_config_dict = {
                                 "scale_to_zero_enabled": scale_to_zero,
                                 "workload_type": workload_type,
                                 "environment_vars": {
-                                    "DATABRICKS_HOST": "https://adb-3630608912046230.10.azuredatabricks.net",
-                                    "DATABRICKS_TOKEN": ""
+                                    "DATABRICKS_HOST": "https://adb-2332510266816567.7.azuredatabricks.net",
+                                    "DATABRICKS_TOKEN": f"{endpoint_token}"
                                     }
                                 }
                             ],
