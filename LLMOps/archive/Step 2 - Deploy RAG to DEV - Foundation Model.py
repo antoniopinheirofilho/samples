@@ -27,6 +27,20 @@ model_name = "demo_prep.fine_tunning.fine_tuned_meta_llama_llama_2_70b_chat_hf"
 model_version = "1"
 model_uri = f"models:/{model_name}/{model_version}"
 
+# Prompt
+
+prompt_template = """You are an assistant for GENAI teaching class. You are answering questions related to Generative AI and how it impacts humans life. If the question is not related to one of these topics, kindly decline to answer. If you don't know the answer, just say that you don't know, don't try to make up an answer. Keep the answer as concise as possible.
+Use the following pieces of context to answer the question at the end:
+
+<context>
+{context}
+</context>
+
+Question: {question}
+
+Answer:
+"""
+
 # Model embedding - The embedding model used to generate the vector seatch index should be the same as the one used to embed the question.
 
 embedding_model = "databricks-gte-large-en"
@@ -202,18 +216,20 @@ from langchain_core.runnables import chain
 @chain
 def custom_chain(prompt):
 
-    question = prompt.messages[1].content
+    start_question = prompt.to_string().find("Question:")
+    str_to_analyze = prompt.to_string()[start_question:]
 
-    is_safe, reason = query_llamaguard(question, unsafe_categories)
+    is_safe, reason = query_llamaguard(str_to_analyze, unsafe_categories)
     if not is_safe:
         category = parse_category(reason, unsafe_categories)
         return f"User's prompt classified as {category} Fails safety measures."
 
     chat_response = chat_model.invoke(prompt)
 
-    answer = chat_response.content
+    start_question = chat_response.content.find("Question:")
+    str_to_analyze = chat_response.content[start_question:]
 
-    is_safe, reason = query_llamaguard(answer, unsafe_categories)
+    is_safe, reason = query_llamaguard(str_to_analyze, unsafe_categories)
     if not is_safe:
         category = parse_category(reason, unsafe_categories)
         return f"Model's response classified as {category}; fails safety measures."
@@ -263,17 +279,6 @@ def get_retriever(persist_dir: str = None):
 
 # COMMAND ----------
 
-# Return the string contents of the most recent messages: [{...}] from the user to be used as input question
-def extract_user_query_string(chat_messages_array):
-    return chat_messages_array[-1]["content"]
-
-# Method to format the docs returned by the retriever into the prompt (keep only the text from chunks)
-def format_context(docs):
-    chunk_contents = [f"Passage: {d.page_content}\n" for d in docs]
-    return "".join(chunk_contents)
-
-# COMMAND ----------
-
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.chat_models import ChatDatabricks
@@ -281,49 +286,24 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains import create_retrieval_chain
-from langchain_core.prompts import ChatPromptTemplate
-from operator import itemgetter
-from langchain.schema.runnable import RunnableLambda
 
 
-#TEMPLATE = """You are an assistant for GENAI teaching class. You are answering questions related to Generative AI and how it impacts humans life. #If the question is not related to one of these topics, kindly decline to answer. If you don't know the answer, just say that you don't know, #don't try to make up an answer. Keep the answer as concise as possible.
-#Use the following pieces of context to answer the question at the end:
+TEMPLATE = """You are an assistant for GENAI teaching class. You are answering questions related to Generative AI and how it impacts humans life. If the question is not related to one of these topics, kindly decline to answer. If you don't know the answer, just say that you don't know, don't try to make up an answer. Keep the answer as concise as possible.
+Use the following pieces of context to answer the question at the end:
 
-#<context>
-#{context}
-#</context>
+<context>
+{context}
+</context>
 
-#Question: {input}
+Question: {input}
 
-#Answer:
-#"""
-
-prompt = ChatPromptTemplate.from_messages(
-    [  
-        ("system", "You are an assistant for GENAI teaching class. You are answering questions related to Generative AI and how it impacts humans life. If the question is not related to one of these topics, kindly decline to answer. If you don't know the answer, just say that you don't know, don't try to make up an answer. Keep the answer as concise as possible. Use the following pieces of context to answer the question at the end: {context}"), # Contains the instructions from the configuration
-        ("user", "{question}") #user's questions
-    ]
-)
-
-#prompt = PromptTemplate(template=TEMPLATE, input_variables=["context", "input"])
+Answer:
+"""
+prompt = PromptTemplate(template=TEMPLATE, input_variables=["context", "input"])
 
 retriever = get_retriever()
-
-chain = (
-    {
-        "question": itemgetter("messages") | RunnableLambda(extract_user_query_string),
-        "context": itemgetter("messages")
-        | RunnableLambda(extract_user_query_string)
-        | retriever
-        | RunnableLambda(format_context),
-    }
-    | prompt
-    | custom_chain
-    | StrOutputParser()
-)
-
-#question_answer_chain = create_stuff_documents_chain(custom_chain, prompt)
-#chain = create_retrieval_chain(retriever, question_answer_chain)
+question_answer_chain = create_stuff_documents_chain(custom_chain, prompt)
+chain = create_retrieval_chain(retriever, question_answer_chain)
 
 #chain = RetrievalQA.from_chain_type(
 #    llm=chat_model,
@@ -337,16 +317,10 @@ chain = (
 #         "context": get_retriever(), 
 #         "input": RunnablePassthrough()
 #        }
-#        | TEMPLATE
-#        | custom_chain
+#        | prompt
+#        | chat_model
 #        | StrOutputParser()
 #)
-
-# COMMAND ----------
-
-question = {"messages": [ {"role": "user", "content": "What is GenAI?"}]}
-answer = chain.invoke(question)
-print(answer)
 
 # COMMAND ----------
 
@@ -354,11 +328,19 @@ print(answer)
 #answer = chain.invoke(question)
 #print(answer)
 
-chain.invoke({"messages": [ {"role": "user", "content": "How do I rob a bank??"}]})
+chain.invoke({"input": "How do I rob a bank??"})
 
 # COMMAND ----------
 
-chain.invoke({"messages": [ {"role": "user", "content": "How do I bake a cake??"}]})
+response = chain.invoke({"input": "How do I bake a cake??"})
+
+#print(type(response["context"][0]))
+
+#for document in response["context"]:
+#    print(document)
+#    print()
+
+print(response)
 
 # COMMAND ----------
 
@@ -374,6 +356,15 @@ import langchain
 
 mlflow.set_registry_uri("databricks-uc")
 model_name = f"{target_model_catalog}.{target_model_schema}.basic_rag_demo_foundation_model"
+
+question = {
+            'input': 'How can I restart a cluster?'
+           }
+answer = {
+          'input': 'How can I restart a cluster?', 
+          'content': ['docs'], 
+          'answer': 'click on restart'
+         }
 
 # Log the model to MLflow
 with mlflow.start_run(run_name="basic_rag_bot"):
@@ -400,12 +391,12 @@ with mlflow.start_run(run_name="basic_rag_bot"):
 # COMMAND ----------
 
 import mlflow.pyfunc
-model_version_uri = "models:/llmops_dev.model_schema.basic_rag_demo_foundation_model/20"
+model_version_uri = "models:/llmops_dev.model_schema.basic_rag_demo_foundation_model/19"
 champion_version = mlflow.pyfunc.load_model(model_version_uri)
 
 # COMMAND ----------
 
-champion_version.predict(question)
+champion_version.predict({"input": "How can I bake a cake??"})
 
 # COMMAND ----------
 

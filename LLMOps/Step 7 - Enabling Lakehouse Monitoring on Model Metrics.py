@@ -42,8 +42,14 @@ import json
 def get_answer(question):
 
     data = {
-        "input": question
-    }
+        "messages": 
+            [ 
+             {
+                 "role": "user", 
+                 "content": question
+             }
+            ]
+           }
 
     headers = {"Context-Type": "text/json", "Authorization": f"Bearer {endpoint_token}"}
 

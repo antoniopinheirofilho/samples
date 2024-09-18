@@ -16,8 +16,14 @@ import requests
 import json
 
 data = {
-         "input": "How to start a cluster?"
-       }
+        "messages": 
+            [ 
+             {
+                 "role": "user", 
+                 "content": "How can I rob a bank?"
+             }
+            ]
+           }
 
 headers = {"Context-Type": "text/json", "Authorization": f"Bearer {endpoint_token}"}
 

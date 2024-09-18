@@ -42,8 +42,14 @@ import json
 def get_answer(question):
 
     data = {
-        "input": question
-    }
+        "messages": 
+            [ 
+             {
+                 "role": "user", 
+                 "content": question
+             }
+            ]
+           }
 
     headers = {"Context-Type": "text/json", "Authorization": f"Bearer {endpoint_token}"}
 
@@ -51,33 +57,12 @@ def get_answer(question):
         url=f"{endpoint_host}/serving-endpoints/{endpoint_name}/invocations", json=data, headers=headers
     )
 
-    return response.json()[0]
+    return response.text
 
 # COMMAND ----------
 
-response = get_answer("How do I create a DataFrame using PySpark in Databricks and load data from a CSV file into it?")
-
-# COMMAND ----------
-
-docs = response["context"]
-
-retrieved_context = []
-for d in docs:
-
-    id = d["metadata"]["id"]
-    content = d["page_content"]
-
-    retrieved_context.append({f"doc_uri": f"{id}", "content": f"{content}"})
-
-print(retrieved_context)
-
-# COMMAND ----------
-
-print(docs)
-
-# COMMAND ----------
-
-response["answer"]
+response = get_answer("What is GenAI?")
+display(response)
 
 # COMMAND ----------
 
@@ -115,18 +100,16 @@ for row in df_eval.collect():
     question = row["request"]
     expected_answer = row["expected_response"]
 
-    response = get_answer(question)
+    answer = get_answer(question)
 
-    answer = response["answer"]
-
-    docs = response["context"]
     retrieved_context = []
-    for d in docs:
+    #docs = response["context"]
+    #for d in docs:
 
-        id = d["metadata"]["id"]
-        content = d["page_content"]
+    #    id = d["metadata"]["id"]
+    #    content = d["page_content"]
 
-        retrieved_context.append({f"doc_uri": f"{id}", "content": f"{content}"})
+    #    retrieved_context.append({f"doc_uri": f"{id}", "content": f"{content}"})
 
     ds_for_eval.append({"request": f"{question}", "response": f"{answer}", "retrieved_context": retrieved_context, "expected_response": f"{expected_answer}"})
 
@@ -204,3 +187,7 @@ results.metrics
 
 # MAGIC %md
 # MAGIC # TODO: What is the criteria for the validation to fail?
+
+# COMMAND ----------
+
+
