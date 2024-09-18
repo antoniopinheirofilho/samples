@@ -25,6 +25,7 @@ endpoint_host = "https://adb-2332510266816567.7.azuredatabricks.net"
 endpoint_name = "llm_prod_endpoint"
 inference_table_name = "llmops_prod.model_tracking.rag_app_realtime_payload"
 inference_processed_table = "llmops_prod.model_tracking.rag_app_realtime_payload_processed"
+lakehouse_monitoring_schema = "llmops_prod.model_tracking"
 endpoint_token = dbutils.secrets.get(scope="creds", key="pat")
 working_dir = "/dbfs/tmp/llmops_prod/rag_app"
 
@@ -88,14 +89,10 @@ import re
 import io
 from pyspark.sql import DataFrame, functions as F
 from pyspark.sql.functions import col, pandas_udf, transform, size, element_at
+from pyspark.sql.types import *
 
 
-def unpack_requests(requests_raw: DataFrame, 
-                    input_request_json_path: str, 
-                    input_json_path_type: str, 
-                    output_request_json_path: str, 
-                    output_json_path_type: str,
-                    keep_last_question_only: False) -> DataFrame:
+def unpack_requests(requests_raw: DataFrame) -> DataFrame:
     # Rename the date column and convert the timestamp milliseconds to TimestampType for downstream processing.
     requests_timestamped = (requests_raw
         .withColumn("timestamp", (col("timestamp_ms") / 1000))
@@ -115,52 +112,31 @@ def unpack_requests(requests_raw: DataFrame,
     requests_success = requests_identified.filter(col("status_code") == 200)
 
     # Unpack JSON.
+    input_json_path_type = StructType([StructField("input", StringType(), True)])
+    output_json_path_type = ArrayType(StructType([
+        StructField("input", StringType(), True), 
+        StructField("context", StringType(), True), 
+        StructField("answer", StringType(), True)
+    ]))
+
     requests_unpacked = (requests_success
-        .withColumn("request", F.from_json(F.expr(f"request:{input_request_json_path}"), input_json_path_type))
-        .withColumn("response", F.from_json(F.expr(f"response:{output_request_json_path}"), output_json_path_type)))
-    
-    if keep_last_question_only:
-        requests_unpacked = requests_unpacked.withColumn("request", F.array(F.element_at(F.col("request"), -1)))
+        .withColumn("request", F.from_json("request", input_json_path_type).input)
+        .withColumn("response", F.from_json("response", output_json_path_type).answer[0]))
 
     # Explode batched requests into individual rows.
-    requests_exploded = (requests_unpacked
-        .withColumn("__db_request_response", F.explode(F.arrays_zip(col("request").alias("input"), col("response").alias("output"))))
-        .selectExpr("* except(__db_request_response, request, response, request_metadata)", "__db_request_response.*")
-        )
+    requests_exploded = requests_unpacked.withColumnRenamed("request", "input").withColumnRenamed("response", "output").drop("request_metadata")
 
     return requests_exploded
 
 # COMMAND ----------
 
-# The format of the input payloads, following the TF "inputs" serving format with a "query" field.
-# Single query input format: {"inputs": [{"query": "User question?"}]}
-INPUT_REQUEST_JSON_PATH = "inputs[*].query"
-
-# Matches the schema returned by the JSON selector (inputs[*].query is an array of string)
-INPUT_JSON_PATH_TYPE = "array<string>"
-KEEP_LAST_QUESTION_ONLY = False
-
-# Answer format: {"predictions": ["answer"]}
-OUTPUT_REQUEST_JSON_PATH = "predictions"
-
-# Matches the schema returned by the JSON selector (predictions is an array of string)
-OUPUT_JSON_PATH_TYPE = "array<string>"
-
-# COMMAND ----------
-
 payloads_sample_df = spark.table(inference_table_name).where('status_code == 200').limit(10)
-display(payloads_sample_df)
 
 # COMMAND ----------
 
 # Unpack using provided helper function
 payloads_unpacked_sample_df = unpack_requests(
-    payloads_sample_df,
-    INPUT_REQUEST_JSON_PATH,
-    INPUT_JSON_PATH_TYPE,
-    OUTPUT_REQUEST_JSON_PATH,
-    OUPUT_JSON_PATH_TYPE,
-    KEEP_LAST_QUESTION_ONLY
+    payloads_sample_df
 )
 
 display(payloads_unpacked_sample_df)
@@ -221,6 +197,20 @@ def compute_metrics(requests_df: DataFrame, column_to_measure = ["input", "outpu
 
 # COMMAND ----------
 
+requests_processed_df = unpack_requests(
+    payloads_sample_df
+)
+
+# Drop un-necessary columns for monitoring jobs
+requests_processed_df = requests_processed_df.drop("date", "status_code", "sampling_fraction", "client_request_id", "databricks_request_id")
+
+# Compute text evaluation metrics
+requests_with_metrics_df = compute_metrics(requests_processed_df)
+
+display(requests_with_metrics_df)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Incrementally unpack & compute metrics from payloads and save to final `_processed` table 
 
@@ -235,12 +225,7 @@ dbutils.fs.rm(checkpoint_location, True)
 # Unpack the requests as a stream.
 requests_raw_df = spark.readStream.table(inference_table_name)
 requests_processed_df = unpack_requests(
-    requests_raw_df,
-    INPUT_REQUEST_JSON_PATH,
-    INPUT_JSON_PATH_TYPE,
-    OUTPUT_REQUEST_JSON_PATH,
-    OUPUT_JSON_PATH_TYPE,
-    KEEP_LAST_QUESTION_ONLY
+    requests_raw_df
 )
 
 # Drop un-necessary columns for monitoring jobs
@@ -283,3 +268,46 @@ create_processed_table_if_not_exists(processed_table_name, requests_with_metrics
 
 # Display the table (with requests and text evaluation metrics) that will be monitored.
 display(spark.table(processed_table_name))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Setup Lakehouse monitoring for the inference table metrics
+
+# COMMAND ----------
+
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.catalog import MonitorTimeSeries
+
+# Create monitor using databricks-sdk's `quality_monitors` client
+w = WorkspaceClient()
+
+try:
+  lhm_monitor = w.quality_monitors.create(
+    table_name=processed_table_name, # Always use 3-level namespace
+    time_series = MonitorTimeSeries(
+      timestamp_col = "timestamp",
+      granularities = ["5 minutes"],
+    ),
+    assets_dir = os.getcwd(),
+    slicing_exprs = ["model_id"],
+    output_schema_name=f"{lakehouse_monitoring_schema}"
+  )
+
+except Exception as lhm_exception:
+  print(lhm_exception)
+
+# COMMAND ----------
+
+from databricks.sdk.service.catalog import MonitorInfoStatus
+
+monitor_info = w.quality_monitors.get(processed_table_name)
+print(monitor_info.status)
+
+if monitor_info.status == MonitorInfoStatus.MONITOR_STATUS_PENDING:
+    print("Wait until monitor creation is completed...")
+
+# COMMAND ----------
+
+monitor_info = w.quality_monitors.get(processed_table_name)
+assert monitor_info.status == MonitorInfoStatus.MONITOR_STATUS_ACTIVE, "Monitoring is not ready yet. Check back in a few minutes or view the monitoring creation process for any errors."
