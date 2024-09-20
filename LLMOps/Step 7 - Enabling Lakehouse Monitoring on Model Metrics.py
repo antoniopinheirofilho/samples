@@ -118,16 +118,18 @@ def unpack_requests(requests_raw: DataFrame) -> DataFrame:
     requests_success = requests_identified.filter(col("status_code") == 200)
 
     # Unpack JSON.
-    input_json_path_type = StructType([StructField("input", StringType(), True)])
-    output_json_path_type = ArrayType(StructType([
-        StructField("input", StringType(), True), 
-        StructField("context", StringType(), True), 
-        StructField("answer", StringType(), True)
-    ]))
+    input_json_path_type = StructType([
+    StructField("messages", ArrayType(StructType([
+        StructField("role", StringType(), True),
+        StructField("content", StringType(), True)
+    ])), True)
+    ])
+
+    output_json_path_type = ArrayType(StringType())
 
     requests_unpacked = (requests_success
-        .withColumn("request", F.from_json("request", input_json_path_type).input)
-        .withColumn("response", F.from_json("response", output_json_path_type).answer[0]))
+        .withColumn("request", F.from_json("request", input_json_path_type).messages[0].content)
+        .withColumn("response", F.from_json("response", output_json_path_type)[0]))
 
     # Explode batched requests into individual rows.
     requests_exploded = requests_unpacked.withColumnRenamed("request", "input").withColumnRenamed("response", "output").drop("request_metadata")
@@ -136,7 +138,7 @@ def unpack_requests(requests_raw: DataFrame) -> DataFrame:
 
 # COMMAND ----------
 
-payloads_sample_df = spark.table(inference_table_name).where('status_code == 200').limit(10)
+payloads_sample_df = spark.table(inference_table_name).where('status_code == 200')
 
 # COMMAND ----------
 
@@ -317,3 +319,7 @@ if monitor_info.status == MonitorInfoStatus.MONITOR_STATUS_PENDING:
 
 monitor_info = w.quality_monitors.get(processed_table_name)
 assert monitor_info.status == MonitorInfoStatus.MONITOR_STATUS_ACTIVE, "Monitoring is not ready yet. Check back in a few minutes or view the monitoring creation process for any errors."
+
+# COMMAND ----------
+
+

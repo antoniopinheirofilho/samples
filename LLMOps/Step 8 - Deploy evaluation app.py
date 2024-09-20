@@ -22,6 +22,8 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 model_name = "llmops_prod.model_schema.basic_rag_demo_foundation_model"
+host = "https://adb-2332510266816567.7.azuredatabricks.net"
+endpoint_token = dbutils.secrets.get(scope="creds", key="pat")
 
 # COMMAND ----------
 
@@ -58,7 +60,12 @@ print(latest_version)
 from databricks.agents import deploy
 from mlflow.utils import databricks_utils as du
 
-deploy(model_name, latest_version)
+deploy(model_name, 
+       latest_version, 
+       environment_vars={
+           "DATABRICKS_HOST": f"{host}",
+           "DATABRICKS_TOKEN": f"{endpoint_token}"
+           })
 
 # COMMAND ----------
 
